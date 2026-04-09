@@ -2,9 +2,7 @@
 #define _SOCKET_HPP
 
 #include <vector>
-#include <iostream>
 #include <string>
-#include <functional>
 
 #include <unistd.h>
 #include <arpa/inet.h>
