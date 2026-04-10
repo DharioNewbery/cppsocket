@@ -3,11 +3,51 @@
 
 #include <vector>
 #include <string>
-
+#include <stdexcept>
+#include <iostream>
 #include <unistd.h>
+
+#if defined(__linux__)
 #include <arpa/inet.h>
 
+#else
+
+#pragma comment(lib, "Ws2_32.lib")
+
+#include <stdint.h>
+#include <winsock2.h>
+#include <sys/types.h>
+#include <ws2tcpip.h>
+
+static int socket_count = 0; 
+
+void win_startup() {
+    socket_count++;
+    static bool is_initialized = false;
+    static WSADATA wsaData;
+    
+    if (is_initialized == true)
+        return;
+    
+    is_initialized = true;
+    
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != NO_ERROR) {
+        std::cout << "Error at WSAStartup()\n";
+    }
+}
+
+void win_cleanup() {
+    socket_count--;
+    if (socket_count < 1)
+        WSACleanup();
+}
+
+#endif
+
+
 namespace cppsocket {
+
+    
 
 /* Encapsulates a file Descriptor related to the socket.
 *  This class is designed to manage the lifecycle of a TCP socket file descriptor,
@@ -19,9 +59,18 @@ public:
     /* Constructors */
     Socket(Socket& other) noexcept = delete;
     Socket(Socket&& other) noexcept { m_fd = other.m_fd; other.m_fd = -1; }
-    Socket(int file_descriptor): m_fd(file_descriptor) {}
+    Socket(int file_descriptor): m_fd(file_descriptor) {
+        #if defined(_WIN32) || defined(_WIN64)
+        win_startup();
+        #endif
+    }
 
-    ~Socket() { if (m_fd != -1) close(m_fd); }
+    ~Socket() {
+        if (m_fd != -1) close(m_fd);
+        #if defined(_WIN32) || defined(_WIN64)
+        win_cleanup();
+        #endif
+    }
 
     /* Recieve bytes from the other end of the connection.
     *  This function first reads the size of the incoming data,
@@ -33,9 +82,16 @@ public:
         
         if (!isValid()) throw std::runtime_error("Invalid socket");
 
+        uint64_t len;
+
         /* Recieve file size */
-        std::size_t len;
-        ::recv(m_fd, &len, sizeof(len), 0);
+        #if defined(__linux__)
+            ::recv(m_fd, &len, sizeof(len), 0);
+        #else
+            std::vector<char> blen(sizeof(len));
+            ::recv(m_fd, blen.data(), blen.size(), 0);
+            len = std::stoull(std::string(blen.begin(), blen.end()));
+        #endif
 
         buffer.resize(len);
 
@@ -60,14 +116,20 @@ public:
         
         if (!isValid()) throw std::runtime_error("Invalid socket");
 
+        uint64_t len = data.size();
         /* Send data size */
-        std::size_t len = data.size();
-        ::send(m_fd, &len, sizeof(len), 0);
+        #if defined(__linux__)
+            ::send(m_fd, &len, sizeof(len), 0);
+        #else
+            std::string slen = std::to_string(len);
+            slen.resize(sizeof(len));
+            ::send(m_fd, slen.data(), slen.size(), 0);
+        #endif
 
         /* Send data content */
         std::size_t total = 0;
         while (total < len) {
-            ssize_t n = ::send(m_fd, data.data() + total, data.size() - total, MSG_NOSIGNAL);
+            ssize_t n = ::send(m_fd, data.data() + total, data.size() - total, 0);
             
             if (n < 0)  throw std::runtime_error("send failed");
             if (n == 0) throw std::runtime_error("Connection closed");
@@ -93,10 +155,22 @@ class Acceptor {
 public:
     /* Constructor */
     Acceptor(const uint16_t &port) {
-        
-        fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
-        ::setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+        #if defined(_WIN32) || defined(_WIN64)
+        win_startup();
+        #endif
 
+        fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+        
+        if (fd_ == -1)
+            throw std::runtime_error("socket() failed");
+
+        #if defined(__linux__)
+        ::setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+        #else
+         
+        if (0 != ::setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, (char *) &opt, sizeof(opt)))
+            throw std::runtime_error("setsockopt() failed");
+        #endif
         sockaddr_in addr{};
         addr.sin_family      = AF_INET;
         addr.sin_port        = htons(port);
@@ -109,7 +183,12 @@ public:
             throw std::runtime_error("listen() failed");
     }
     
-    ~Acceptor() { if (fd_ == -1) close(fd_); }
+    ~Acceptor() {
+        if (fd_ == -1) close(fd_);
+        #if defined(_WIN32) || defined(_WIN64)
+        win_startup();
+        #endif
+    }
 
     /* Accepts a connection from the backlog and creates a socket.
      * @throw std::runtime_error on error. */
@@ -138,6 +217,8 @@ private:
  * @return Socket for the accepted connection.
  * @throw std::runtime_error on error. */
 Socket connect(const std::string &host, const uint16_t &port) {
+    win_startup();
+
     int fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
     Socket socket(fd_);
 
