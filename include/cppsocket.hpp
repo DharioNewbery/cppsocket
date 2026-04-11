@@ -20,10 +20,10 @@
 #include <ws2tcpip.h>
 
 static int socket_count = 0; 
+static bool is_initialized = false;
 
 void win_startup() {
     socket_count++;
-    static bool is_initialized = false;
     static WSADATA wsaData;
     
     if (is_initialized == true)
@@ -38,16 +38,15 @@ void win_startup() {
 
 void win_cleanup() {
     socket_count--;
-    if (socket_count < 1)
+    if (socket_count < 1) {
+        is_initialized = false;
         WSACleanup();
+    }
 }
 
 #endif
 
-
 namespace cppsocket {
-
-    
 
 /* Encapsulates a file Descriptor related to the socket.
 *  This class is designed to manage the lifecycle of a TCP socket file descriptor,
@@ -57,16 +56,28 @@ namespace cppsocket {
 class Socket {
 public:
     /* Constructors */
-    Socket(Socket& other) noexcept = delete;
-    Socket(Socket&& other) noexcept { m_fd = other.m_fd; other.m_fd = -1; }
     Socket(int file_descriptor): m_fd(file_descriptor) {
+        #if defined(_WIN32) || defined(_WIN64)
+        win_startup();
+        #endif
+    }
+    Socket(Socket& other) noexcept = delete;
+    Socket(Socket&& other) noexcept { 
+        m_fd = other.m_fd; 
+        other.m_fd = -1; 
         #if defined(_WIN32) || defined(_WIN64)
         win_startup();
         #endif
     }
 
     ~Socket() {
-        if (m_fd != -1) close(m_fd);
+        if (m_fd != -1) {
+            #if defined(_WIN32) || defined(_WIN64)
+            closesocket(m_fd);
+            #else
+            close(m_fd);
+            #endif
+        }
         #if defined(_WIN32) || defined(_WIN64)
         win_cleanup();
         #endif
@@ -82,15 +93,13 @@ public:
         
         if (!isValid()) throw std::runtime_error("Invalid socket");
 
-        uint64_t len;
+        uint64_t len = 0;
 
         /* Recieve file size */
         #if defined(__linux__)
             ::recv(m_fd, &len, sizeof(len), 0);
         #else
-            std::vector<char> blen(sizeof(len));
-            ::recv(m_fd, blen.data(), blen.size(), 0);
-            len = std::stoull(std::string(blen.begin(), blen.end()));
+            ::recv(m_fd, reinterpret_cast<char*>(&len), sizeof(len), 0);
         #endif
 
         buffer.resize(len);
@@ -116,14 +125,12 @@ public:
         
         if (!isValid()) throw std::runtime_error("Invalid socket");
 
-        uint64_t len = data.size();
         /* Send data size */
+        uint64_t len = data.size();
         #if defined(__linux__)
             ::send(m_fd, &len, sizeof(len), 0);
-        #else
-            std::string slen = std::to_string(len);
-            slen.resize(sizeof(len));
-            ::send(m_fd, slen.data(), slen.size(), 0);
+        #else    
+            std::cout << ::send(m_fd, reinterpret_cast<char*>(&len), sizeof(len), 0) << "\n";
         #endif
 
         /* Send data content */
@@ -183,10 +190,16 @@ public:
             throw std::runtime_error("listen() failed");
     }
     
-    ~Acceptor() {
-        if (fd_ == -1) close(fd_);
+~Acceptor() {
+        if (fd_ != -1) {
+            #if defined(_WIN32) || defined(_WIN64)
+            closesocket(fd_); // FIX: Use closesocket
+            #else
+            close(fd_);
+            #endif
+        }
         #if defined(_WIN32) || defined(_WIN64)
-        win_startup();
+        win_cleanup(); // FIX: Was mistakenly win_startup()
         #endif
     }
 
@@ -217,7 +230,9 @@ private:
  * @return Socket for the accepted connection.
  * @throw std::runtime_error on error. */
 Socket connect(const std::string &host, const uint16_t &port) {
+    #if defined(_WIN32) || defined(_WIN64)
     win_startup();
+    #endif
 
     int fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
     Socket socket(fd_);
