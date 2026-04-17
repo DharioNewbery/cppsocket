@@ -115,6 +115,13 @@ public:
         }
     }
 
+    /* String overload of recv */
+    void recv(std::string &buffer) {
+        std::vector<char> temp;
+        recv(temp);
+        buffer = std::string(temp.begin(), temp.end());
+    }
+
     /* send bytes to the other end of the connection
     *  Sends the size of the data first, followed by the actual data content. This
     *  allows the receiver to know how much data to expect and handle it accordingly,
@@ -143,6 +150,12 @@ public:
 
             total += static_cast<std::size_t>(n);
         }
+    }
+
+    /* String overload of send */
+    void send(const std::string &data) {
+        std::vector<char> temp(data.begin(), data.end());
+        send(temp);
     }
 
     /* Checks if the socket is valid (i.e., has a valid file descriptor).
