@@ -137,7 +137,7 @@ public:
         #if defined(__linux__)
             ::send(m_fd, &len, sizeof(len), 0);
         #else    
-            std::cout << ::send(m_fd, reinterpret_cast<char*>(&len), sizeof(len), 0) << "\n";
+            ::send(m_fd, reinterpret_cast<char*>(&len), sizeof(len), 0);
         #endif
 
         /* Send data content */
@@ -181,8 +181,8 @@ private:
         res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
         res[1] = ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuseaddr, sizeof(reuseaddr));
         #else
-        res[0] = ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *) &opt, sizeof(opt));
-        res[1] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (char *) &v6only, sizeof(v6only));
+        res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (char *) &v6only, sizeof(v6only));
+        res[1] = ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *) &reuseaddr, sizeof(reuseaddr));
         #endif
 
         for (int i = 0; i < 2; i++)
