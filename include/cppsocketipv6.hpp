@@ -253,30 +253,66 @@ private:
     inline const static int backlog = 10;
 };
 
+/* Helper function to check which protocol the ip address is using.
+ * @param A given ip string.
+ * @return 0 if Ipv4, 1 if Ipv6 and -1 if invalid ip. */ 
+int checkIPVersion(const std::string& ip) {
+    unsigned char buf[sizeof(struct in6_addr)]; // Sufficient size for both IPv4/Ipv6
+
+    if (inet_pton(AF_INET, ip.c_str(), buf) == 1) {
+        return 0;
+    }
+
+    if (inet_pton(AF_INET6, ip.c_str(), buf) == 1) {
+        return 1;
+    }
+    return -1;
+}
+
+
 /* Connects to a given address and creates a socket for that connection.
  * @param host The server's IPV4 address.
  * @param port The port that the server is listening to.
  * @return Socket for the accepted connection.
- * @throw std::runtime_error on error. */
+ * @throw std::runtime_error on error. */ 
 Socket connect(const std::string &host, const uint16_t &port) {
     #if defined(_WIN32) || defined(_WIN64)
     win_startup();
     #endif
 
-    int fd_ = ::socket(AF_INET6, SOCK_STREAM, 0);
-    Socket socket(fd_);
+    int fd;
 
-    sockaddr_in6 addr{};
-    addr.sin6_family = AF_INET6;
-    addr.sin6_port   = htons(port);
+    int ipVersion = checkIPVersion(host);
 
-    if (::inet_pton(AF_INET6, host.c_str(), &addr.sin6_addr) != 1)
+    if (ipVersion == 0) {
+        fd = ::socket(AF_INET, SOCK_STREAM, 0);
+
+        sockaddr_in addr{};
+        addr.sin_family      = AF_INET;
+        addr.sin_port        = htons(port);
+        addr.sin_addr.s_addr = INADDR_ANY; 
+
+        ::inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
+
+        if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0)
+            throw std::runtime_error("connect() failed");
+
+    } else if (ipVersion == 1) {
+        fd = ::socket(AF_INET6, SOCK_STREAM, 0);
+
+        sockaddr_in6 addr{};
+        addr.sin6_family = AF_INET6;
+        addr.sin6_port   = htons(port);
+
+        ::inet_pton(AF_INET6, host.c_str(), &addr.sin6_addr);
+
+        if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0)
+            throw std::runtime_error("connect() failed");
+    } else {
         throw std::runtime_error("invalid address: " + host);
-
-    if (::connect(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0)
-        throw std::runtime_error("connect() failed");
+    }
     
-    return std::move(socket);
+    return Socket(fd);
 }
 
 }
