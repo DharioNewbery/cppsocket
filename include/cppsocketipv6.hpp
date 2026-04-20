@@ -217,7 +217,8 @@ public:
             if (fd == -1) throw std::runtime_error("socket() failed");
         };
 
-        if (setOptions() != 0)          throw std::runtime_error("setsockopt() failed");
+        int setOptionsResult = setOptions();
+        if (setOptionsResult != 0)      throw std::runtime_error("setsockopt() failed at option " + setOptionsResult);
         if (bind(port) != 0)            throw std::runtime_error("bind() failed");
         if (::listen(fd, backlog) != 0) throw std::runtime_error("listen() failed");
     }
