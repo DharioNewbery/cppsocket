@@ -212,7 +212,11 @@ public:
 
         fd = ::socket(AF_INET6, SOCK_STREAM, 0);
         
-        if (fd == -1)                   throw std::runtime_error("socket() failed");
+        if (fd == -1) {
+            fd = ::socket(AF_INET, SOCK_STREAM, 0); // IPv4 fallback
+            if (fd == -1) throw std::runtime_error("socket() failed");
+        };
+
         if (setOptions() != 0)          throw std::runtime_error("setsockopt() failed");
         if (bind(port) != 0)            throw std::runtime_error("bind() failed");
         if (::listen(fd, backlog) != 0) throw std::runtime_error("listen() failed");
@@ -221,13 +225,13 @@ public:
 ~Acceptor() {
         if (fd != -1) {
             #if defined(_WIN32) || defined(_WIN64)
-            closesocket(fd); // FIX: Use closesocket
+            closesocket(fd);
             #else
             close(fd);
             #endif
         }
         #if defined(_WIN32) || defined(_WIN64)
-        win_cleanup(); // FIX: Was mistakenly win_startup()
+        win_cleanup();
         #endif
     }
 
