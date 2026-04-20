@@ -1,5 +1,5 @@
-#ifndef _SOCKET_HPP
-#define _SOCKET_HPP
+#ifndef _SOCKETIPV6_HPP
+#define _SOCKETIPV6_HPP
 
 #include <vector>
 #include <string>
@@ -137,7 +137,7 @@ public:
         #if defined(__linux__)
             ::send(m_fd, &len, sizeof(len), 0);
         #else    
-            std::cout << ::send(m_fd, reinterpret_cast<char*>(&len), sizeof(len), 0) << "\n";
+            ::send(m_fd, reinterpret_cast<char*>(&len), sizeof(len), 0);
         #endif
 
         /* Send data content */
@@ -172,6 +172,37 @@ private:
 *  Responsible for setting up a server socket that listens on a specified port, accepting
 *  incoming client connections, and creating Socket objects for each accepted connection. */
 class Acceptor {
+private:
+    /* Wrapper to sock options.
+     * @returns 0 if all is ok. */
+    int setOptions() {
+        int res[2];
+        #if defined(__linux__)
+        res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
+        res[1] = ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuseaddr, sizeof(reuseaddr));
+        #else
+        res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (char *) &v6only, sizeof(v6only));
+        res[1] = ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *) &reuseaddr, sizeof(reuseaddr));
+        #endif
+
+        for (int i = 0; i < 2; i++)
+        if (res[i] != 0) return res[i]; // Error
+
+        return 0; // Success
+    }
+
+    /* Associates a local address with a socket.
+     * @param port the port that will be used.
+     * @returns 0 if all is ok. */
+    int bind(int port) {
+        sockaddr_in6 addr{};
+        addr.sin6_family = AF_INET6;
+        addr.sin6_port   = htons(port);
+        addr.sin6_addr   = in6addr_any;
+
+        return ::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    }
+    
 public:
     /* Constructor */
     Acceptor(const uint16_t &port) {
@@ -179,88 +210,114 @@ public:
         win_startup();
         #endif
 
-        fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+        fd = ::socket(AF_INET6, SOCK_STREAM, 0);
         
-        if (fd_ == -1)
-            throw std::runtime_error("socket() failed");
+        if (fd == -1) {
+            fd = ::socket(AF_INET, SOCK_STREAM, 0); // IPv4 fallback
+            if (fd == -1) throw std::runtime_error("socket() failed");
+        };
 
-        #if defined(__linux__)
-        ::setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-        #else
-         
-        if (0 != ::setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, (char *) &opt, sizeof(opt)))
-            throw std::runtime_error("setsockopt() failed");
-        #endif
-        sockaddr_in addr{};
-        addr.sin_family      = AF_INET;
-        addr.sin_port        = htons(port);
-        addr.sin_addr.s_addr = INADDR_ANY;
-
-        if (::bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0)
-            throw std::runtime_error("bind() failed");
-
-        if (::listen(fd_, backlog) < 0)
-            throw std::runtime_error("listen() failed");
+        int setOptionsResult = setOptions();
+        if (setOptionsResult != 0)      throw std::runtime_error("setsockopt() failed at option " + setOptionsResult);
+        if (bind(port) != 0)            throw std::runtime_error("bind() failed");
+        if (::listen(fd, backlog) != 0) throw std::runtime_error("listen() failed");
     }
     
 ~Acceptor() {
-        if (fd_ != -1) {
+        if (fd != -1) {
             #if defined(_WIN32) || defined(_WIN64)
-            closesocket(fd_); // FIX: Use closesocket
+            closesocket(fd);
             #else
-            close(fd_);
+            close(fd);
             #endif
         }
         #if defined(_WIN32) || defined(_WIN64)
-        win_cleanup(); // FIX: Was mistakenly win_startup()
+        win_cleanup();
         #endif
     }
 
     /* Accepts a connection from the backlog and creates a socket.
      * @throw std::runtime_error on error. */
     Socket accept() {
-        sockaddr_in client_addr{};
+        sockaddr_in6 client_addr{};
         socklen_t len = sizeof(client_addr);
 
-        int client_fd = ::accept(fd_, reinterpret_cast<sockaddr*>(&client_addr), &len);
+        int client_fd = ::accept(fd, reinterpret_cast<sockaddr*>(&client_addr), &len);
         if (client_fd < 0) throw std::runtime_error("accept() failed");
 
         char buf[INET_ADDRSTRLEN] = {};
-        ::inet_ntop(AF_INET, &client_addr.sin_addr, buf, sizeof(buf));
+        ::inet_ntop(AF_INET6, &client_addr.sin6_addr, buf, sizeof(buf));
 
         return Socket(client_fd);
     }
 
 private:
-    int fd_ = -1;
-    inline const static int opt = 1;
+    int fd = -1;
+    inline const static int reuseaddr = 1; // Reuse socket for new connections after first one happens (1 = true, 0 = false)
+    inline const static int v6only = 0;    // Accepts only ipv6 connections (1 = true, 0 = false)
     inline const static int backlog = 10;
 };
+
+/* Helper function to check which protocol the ip address is using.
+ * @param A given ip string.
+ * @return 0 if Ipv4, 1 if Ipv6 and -1 if invalid ip. */ 
+int checkIPVersion(const std::string& ip) {
+    unsigned char buf[sizeof(struct in6_addr)]; // Sufficient size for both IPv4/Ipv6
+
+    if (inet_pton(AF_INET, ip.c_str(), buf) == 1) {
+        return 0;
+    }
+
+    if (inet_pton(AF_INET6, ip.c_str(), buf) == 1) {
+        return 1;
+    }
+    return -1;
+}
+
 
 /* Connects to a given address and creates a socket for that connection.
  * @param host The server's IPV4 address.
  * @param port The port that the server is listening to.
  * @return Socket for the accepted connection.
- * @throw std::runtime_error on error. */
+ * @throw std::runtime_error on error. */ 
 Socket connect(const std::string &host, const uint16_t &port) {
     #if defined(_WIN32) || defined(_WIN64)
     win_startup();
     #endif
 
-    int fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
-    Socket socket(fd_);
+    int fd;
 
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port   = htons(port);
+    int ipVersion = checkIPVersion(host);
 
-    if (::inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1)
+    if (ipVersion == 0) {
+        fd = ::socket(AF_INET, SOCK_STREAM, 0);
+
+        sockaddr_in addr{};
+        addr.sin_family      = AF_INET;
+        addr.sin_port        = htons(port);
+        addr.sin_addr.s_addr = INADDR_ANY; 
+
+        ::inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
+
+        if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0)
+            throw std::runtime_error("connect() failed");
+
+    } else if (ipVersion == 1) {
+        fd = ::socket(AF_INET6, SOCK_STREAM, 0);
+
+        sockaddr_in6 addr{};
+        addr.sin6_family = AF_INET6;
+        addr.sin6_port   = htons(port);
+
+        ::inet_pton(AF_INET6, host.c_str(), &addr.sin6_addr);
+
+        if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0)
+            throw std::runtime_error("connect() failed");
+    } else {
         throw std::runtime_error("invalid address: " + host);
-
-    if (::connect(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0)
-        throw std::runtime_error("connect() failed");
+    }
     
-    return std::move(socket);
+    return Socket(fd);
 }
 
 }
