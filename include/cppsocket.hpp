@@ -96,27 +96,31 @@ void recv(std::vector<char> &buffer) {
         if (!isValid()) throw std::runtime_error("Invalid socket");
 
         uint64_t len = 0;
-        ssize_t header_bytes = 0;
+        
+        unsigned short headerTotal = 0;
+        while (headerTotal < sizeof(len)) {
+            #if defined(__linux__)
+                ssize_t n = ::recv(m_fd, &len + headerTotal, sizeof(len) - headerTotal, 0);
+            #else
+                ssize_t n = ::recv(m_fd, reinterpret_cast<char*>(&len) + headerTotal, sizeof(len) - headerTotal, 0);
+            #endif
 
-        #if defined(__linux__)
-            header_bytes = ::recv(m_fd, &len, sizeof(len), 0);
-        #else
-            header_bytes = ::recv(m_fd, reinterpret_cast<char*>(&len), sizeof(len), 0);
-        #endif
+            if (n == 0) throw std::runtime_error("Connection closed");
+            if (n < 0)  throw std::runtime_error("recv failed reading header");
 
-        if (header_bytes == 0) throw std::runtime_error("Connection closed");
-        if (header_bytes < 0)  throw std::runtime_error("recv failed reading header");
+            headerTotal += static_cast<std::size_t>(n);
+        }
 
         buffer.resize(len);
-        std::size_t total = 0;
+        std::size_t payloadTotal = 0;
         
-        while (total < len) {
-            ssize_t n = ::recv(m_fd, buffer.data() + total, buffer.size() - total, 0);
+        while (payloadTotal < len) {
+            ssize_t n = ::recv(m_fd, buffer.data() + payloadTotal, buffer.size() - payloadTotal, 0);
             
             if (n < 0)  throw std::runtime_error("recv failed reading payload"); 
             if (n == 0) throw std::runtime_error("Connection closed during payload");
 
-            total += static_cast<std::size_t>(n);
+            payloadTotal += static_cast<std::size_t>(n);
         }
     }
     
@@ -137,23 +141,29 @@ void recv(std::vector<char> &buffer) {
         
         if (!isValid()) throw std::runtime_error("Invalid socket");
 
-        /* Send data size */
         uint64_t len = data.size();
-        #if defined(__linux__)
-            ::send(m_fd, &len, sizeof(len), 0);
-        #else    
-            ::send(m_fd, reinterpret_cast<char*>(&len), sizeof(len), 0);
-        #endif
 
+        /* Send data size */
+        std::size_t headerTotal = 0;
+        while (headerTotal < sizeof(uint64_t)) {
+            #if defined(__linux__)
+                ssize_t n = ::send(m_fd, &len + headerTotal, sizeof(len) - headerTotal, 0);
+            #else
+                ssize_t n = ::send(m_fd, reinterpret_cast<char*>(&len) + headerTotal, sizeof(len) - headerTotal, 0);
+            #endif
+
+            headerTotal += static_cast<std::size_t>(n);
+        }
+        
         /* Send data content */
-        std::size_t total = 0;
-        while (total < len) {
-            ssize_t n = ::send(m_fd, data.data() + total, data.size() - total, 0);
+        std::size_t payloadTotal = 0;
+        while (payloadTotal < len) {
+            ssize_t n = ::send(m_fd, data.data() + payloadTotal, data.size() - payloadTotal, 0);
             
             if (n < 0)  throw std::runtime_error("send failed");
             if (n == 0) throw std::runtime_error("Connection closed");
 
-            total += static_cast<std::size_t>(n);
+            payloadTotal += static_cast<std::size_t>(n);
         }
     }
 
