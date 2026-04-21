@@ -6,18 +6,21 @@
 #include <stdexcept>
 #include <iostream>
 #include <unistd.h>
+#include <map>
+#include <algorithm>
 
 #if defined(__linux__)
 #include <arpa/inet.h>
-
+#include <fcntl.h>
+#include <poll.h>
 #else
 
 #pragma comment(lib, "Ws2_32.lib")
-
 #include <stdint.h>
 #include <winsock2.h>
 #include <sys/types.h>
 #include <ws2tcpip.h>
+#define poll WSAPoll
 
 static int socket_count = 0; 
 static bool is_initialized = false;
@@ -89,8 +92,7 @@ public:
     *  allows it to handle large files that may require multiple recv calls.
     *  @param buffer A reference to a vector that will be resized and filled with the received data.
     *  @throw std::runtime_error on error. */
-    void recv(std::vector<char> &buffer) {
-        
+void recv(std::vector<char> &buffer) {
         if (!isValid()) throw std::runtime_error("Invalid socket");
 
         uint64_t len = 0;
@@ -167,7 +169,7 @@ public:
         return m_fd != -1;
     }
 
-    const int getFd() const { return m_fd; }
+    const int getFd()  { return m_fd; }
 
 private:
     int m_fd;
@@ -181,13 +183,15 @@ private:
     /* Wrapper to sock options.
      * @returns 0 if all is ok. */
     int setOptions() {
-        int res[2];
+        int res[3];
         #if defined(__linux__)
         res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
         res[1] = ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuseaddr, sizeof(reuseaddr));
+        res[2] = ::fcntl(fd, F_SETFL, O_NONBLOCK); 
         #else
         res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (char *) &v6only, sizeof(v6only));
         res[1] = ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *) &reuseaddr, sizeof(reuseaddr));
+        res[2] = ::ioctlsocket(fd, FIONBIO, (u_long*) &reuseaddr);
         #endif
 
         for (int i = 0; i < 2; i++)
@@ -204,7 +208,6 @@ private:
         addr.sin6_family = AF_INET6;
         addr.sin6_port   = htons(port);
         addr.sin6_addr   = in6addr_any;
-
         return ::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
     }
     
@@ -228,6 +231,7 @@ public:
         if (::listen(fd, backlog) != 0) throw std::runtime_error("listen() failed");
     }
     
+    const int getFd() const { return fd; }
 ~Acceptor() {
         if (fd != -1) {
             #if defined(_WIN32) || defined(_WIN64)
@@ -248,7 +252,7 @@ public:
         socklen_t len = sizeof(client_addr);
 
         int client_fd = ::accept(fd, reinterpret_cast<sockaddr*>(&client_addr), &len);
-        if (client_fd < 0) throw std::runtime_error("accept() failed");
+        if (client_fd < 0 && errno != EAGAIN && errno != EWOULDBLOCK) throw std::runtime_error("accept() failed");
 
         char buf[INET_ADDRSTRLEN] = {};
         ::inet_ntop(AF_INET6, &client_addr.sin6_addr, buf, sizeof(buf));
@@ -278,7 +282,6 @@ int checkIPVersion(const std::string& ip) {
     }
     return -1;
 }
-
 
 /* Connects to a given address and creates a socket for that connection.
  * @param host The server's IPV4 address.
@@ -324,6 +327,90 @@ Socket connect(const std::string &host, const uint16_t &port) {
     
     return Socket(fd);
 }
+
+
+/* Multi-Socket Poller implementation */
+class Poller {
+public:
+    void add(Acceptor &acceptor, short events = POLLIN) {
+        add(acceptor.getFd(), events);
+    }
+
+    void add(Socket &&socket, short events = POLLIN) {
+        add(socket.getFd(), events);
+        m_clients.emplace(socket.getFd(), std::move(socket));
+    }
+
+    void remove(int fd) {
+        m_fds.erase(
+            std::remove_if(m_fds.begin(), m_fds.end(), [fd](const pollfd& p) { return p.fd == fd; }),
+            m_fds.end()
+        );
+    }
+
+    int wait(int timeout_ms = -1) {
+        if (m_fds.empty()) return 0;
+
+        #if defined(__linux__)
+        int res = ::poll(m_fds.data(), m_fds.size(), timeout_ms);
+        #else
+        int res = WSAPoll(m_fds.data(), m_fds.size(), timeout_ms);
+        #endif
+
+        if (res < 0) throw std::runtime_error("poll() failed");
+        return res;
+    }
+
+    bool isReady(int fd, short event = POLLIN) const {
+        for (const auto& pfd : m_fds) {
+            if (pfd.fd == fd) {
+                return (pfd.revents & event) != 0;
+            }
+        }
+        return false;
+    }
+
+    void execute(auto func) {
+        for (auto it = m_clients.begin(); it != m_clients.end(); ) {
+            int clientFd = it->first;
+            cppsocket::Socket& clientSock = it->second;
+            
+            if (isReady(clientFd, POLLIN)) {
+                try {
+                    func(clientSock);
+                    ++it;
+                } catch (const std::runtime_error& e) {
+                    remove(clientFd);
+                    it = m_clients.erase(it);
+                }
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    const std::vector<pollfd>& getFds() const {
+        return m_fds;
+    }
+
+private:
+    std::vector<pollfd> m_fds;
+    std::map<int, Socket> m_clients;
+
+    void add(int fd, short events = POLLIN) {
+        if (fd == -1) throw std::runtime_error("Trying to add invalid fd to poller");
+
+        for (auto& pfd : m_fds) {
+            if (pfd.fd == fd) {
+                pfd.events = events;
+                return;
+            }
+        }
+
+        m_fds.push_back({fd, events, 0});
+    }
+};
+
 
 }
 
