@@ -94,27 +94,30 @@ public:
         if (!isValid()) throw std::runtime_error("Invalid socket");
 
         uint64_t len = 0;
+        ssize_t header_bytes = 0;
 
-        /* Recieve file size */
         #if defined(__linux__)
-            ::recv(m_fd, &len, sizeof(len), 0);
+            header_bytes = ::recv(m_fd, &len, sizeof(len), 0);
         #else
-            ::recv(m_fd, reinterpret_cast<char*>(&len), sizeof(len), 0);
+            header_bytes = ::recv(m_fd, reinterpret_cast<char*>(&len), sizeof(len), 0);
         #endif
 
-        buffer.resize(len);
+        if (header_bytes == 0) throw std::runtime_error("Connection closed");
+        if (header_bytes < 0)  throw std::runtime_error("recv failed reading header");
 
+        buffer.resize(len);
         std::size_t total = 0;
+        
         while (total < len) {
             ssize_t n = ::recv(m_fd, buffer.data() + total, buffer.size() - total, 0);
             
-            if (n < 0)  throw std::runtime_error("recv failed"); 
-            if (n == 0) throw std::runtime_error("Connection closed");
+            if (n < 0)  throw std::runtime_error("recv failed reading payload"); 
+            if (n == 0) throw std::runtime_error("Connection closed during payload");
 
             total += static_cast<std::size_t>(n);
         }
     }
-
+    
     /* String overload of recv */
     void recv(std::string &buffer) {
         std::vector<char> temp;
@@ -163,6 +166,8 @@ public:
     bool isValid() const {
         return m_fd != -1;
     }
+
+    const int getFd() const { return m_fd; }
 
 private:
     int m_fd;
