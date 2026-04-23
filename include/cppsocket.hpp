@@ -97,13 +97,9 @@ void recv(std::vector<char> &buffer) {
 
         uint64_t len = 0;
         
-        unsigned short headerTotal = 0;
+        std::size_t headerTotal = 0;
         while (headerTotal < sizeof(len)) {
-            #if defined(__linux__)
-                ssize_t n = ::recv(m_fd, &len + headerTotal, sizeof(len) - headerTotal, 0);
-            #else
-                ssize_t n = ::recv(m_fd, reinterpret_cast<char*>(&len) + headerTotal, sizeof(len) - headerTotal, 0);
-            #endif
+            ssize_t n = ::recv(m_fd, reinterpret_cast<char*>(&len) + headerTotal, sizeof(len) - headerTotal, 0);
 
             if (n == 0) throw std::runtime_error("Connection closed");
             if (n < 0)  throw std::runtime_error("recv failed reading header");
@@ -112,8 +108,8 @@ void recv(std::vector<char> &buffer) {
         }
 
         buffer.resize(len);
-        std::size_t payloadTotal = 0;
         
+        std::size_t payloadTotal = 0;
         while (payloadTotal < len) {
             ssize_t n = ::recv(m_fd, buffer.data() + payloadTotal, buffer.size() - payloadTotal, 0);
             
@@ -146,11 +142,7 @@ void recv(std::vector<char> &buffer) {
         /* Send data size */
         std::size_t headerTotal = 0;
         while (headerTotal < sizeof(uint64_t)) {
-            #if defined(__linux__)
-                ssize_t n = ::send(m_fd, &len + headerTotal, sizeof(len) - headerTotal, 0);
-            #else
-                ssize_t n = ::send(m_fd, reinterpret_cast<char*>(&len) + headerTotal, sizeof(len) - headerTotal, 0);
-            #endif
+            ssize_t n = ::send(m_fd, reinterpret_cast<char*>(&len) + headerTotal, sizeof(len) - headerTotal, 0);
 
             headerTotal += static_cast<std::size_t>(n);
         }
