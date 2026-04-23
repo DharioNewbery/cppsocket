@@ -50,6 +50,24 @@ void win_cleanup() {
 
 #endif
 
+namespace {
+
+/* Manual implementation of serialization of uint64 to big-endian bytes */
+inline uint64_t hostToNet64(uint64_t value) {
+    uint64_t result = 0;
+    for (int i = 7; i >= 0; --i) {
+        reinterpret_cast<uint8_t*>(&result)[i] = value & 0xFF;
+        value >>= 8;
+    }
+    return result;
+}
+
+inline uint64_t netToHost64(uint64_t value) {
+    return hostToNet64(value);
+}
+
+};
+
 namespace cppsocket {
 
 /* Encapsulates a file Descriptor related to the socket.
@@ -92,11 +110,11 @@ public:
 void recv(std::vector<char> &buffer) {
         if (!isValid()) throw std::runtime_error("Invalid socket");
 
-        uint64_t len = 0;
+        uint64_t lenNet = 0;
         
         std::size_t headerTotal = 0;
-        while (headerTotal < sizeof(len)) {
-            ssize_t n = ::recv(m_fd, reinterpret_cast<char*>(&len) + headerTotal, sizeof(len) - headerTotal, 0);
+        while (headerTotal < sizeof(lenNet)) {
+            ssize_t n = ::recv(m_fd, reinterpret_cast<char*>(&lenNet) + headerTotal, sizeof(lenNet) - headerTotal, 0);
 
             if (n == 0) throw std::runtime_error("Connection closed reading header");
             if (n < 0)  throw std::runtime_error("recv failed reading header");
@@ -104,6 +122,7 @@ void recv(std::vector<char> &buffer) {
             headerTotal += static_cast<std::size_t>(n);
         }
 
+        uint64_t len = netToHost64(lenNet);
         buffer.resize(len);
 
         std::size_t payloadTotal = 0;
@@ -135,11 +154,12 @@ void recv(std::vector<char> &buffer) {
         if (!isValid()) throw std::runtime_error("Invalid socket");
 
         uint64_t len = data.size();
+        uint64_t lenNet = hostToNet64(len);
 
         /* Send data size */
         std::size_t headerTotal = 0;
         while (headerTotal < sizeof(uint64_t)) {
-            ssize_t n = ::send(m_fd, reinterpret_cast<char*>(&len) + headerTotal, sizeof(len) - headerTotal, 0);
+            ssize_t n = ::send(m_fd, reinterpret_cast<char*>(&lenNet) + headerTotal, sizeof(lenNet) - headerTotal, 0);
 
             if (n < 0)  throw std::runtime_error("send failed sending header");
             if (n == 0) throw std::runtime_error("Connection closed sending header");
