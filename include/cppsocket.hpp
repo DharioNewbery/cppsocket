@@ -346,14 +346,6 @@ public:
         m_clients.emplace(socket.getFd(), std::move(socket));
     }
 
-    void remove(int fd) {
-        m_fds.erase(
-            std::remove_if(m_fds.begin(), m_fds.end(), [fd](const pollfd& p) { return p.fd == fd; }),
-            m_fds.end()
-        );
-        m_clients.erase(m_clients.find(fd));
-    }
-
     int wait(int timeout_ms = -1) {
         if (m_fds.empty()) return 0;
 
@@ -386,7 +378,11 @@ public:
                     func(clientSock);
                     ++it;
                 } catch (const std::runtime_error& e) {
-                    remove(clientFd);
+                    m_fds.erase(
+                        std::remove_if(m_fds.begin(), m_fds.end(),
+                            [clientFd](const pollfd& p) { return p.fd == clientFd; }),
+                        m_fds.end()
+                    );
                     it = m_clients.erase(it);
                 }
             } else {
