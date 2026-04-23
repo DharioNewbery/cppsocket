@@ -21,6 +21,7 @@
 #include <sys/types.h>
 #include <ws2tcpip.h>
 #define poll WSAPoll
+#define close closesocket
 
 static int socket_count = 0; 
 static bool is_initialized = false;
@@ -75,11 +76,7 @@ public:
 
     ~Socket() {
         if (m_fd != -1) {
-            #if defined(_WIN32) || defined(_WIN64)
-            closesocket(m_fd);
-            #else
             close(m_fd);
-            #endif
         }
         #if defined(_WIN32) || defined(_WIN64)
         win_cleanup();
@@ -312,8 +309,10 @@ Socket connect(const std::string &host, const uint16_t &port) {
 
         ::inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
 
-        if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0)
+        if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+            close(fd);
             throw std::runtime_error("connect() failed");
+        }
 
     } else if (ipVersion == 1) {
         fd = ::socket(AF_INET6, SOCK_STREAM, 0);
@@ -324,8 +323,10 @@ Socket connect(const std::string &host, const uint16_t &port) {
 
         ::inet_pton(AF_INET6, host.c_str(), &addr.sin6_addr);
 
-        if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0)
+        if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+            close(fd);
             throw std::runtime_error("connect() failed");
+        }
     } else {
         throw std::runtime_error("invalid address: " + host);
     }
