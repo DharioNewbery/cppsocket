@@ -184,7 +184,7 @@ class Acceptor {
 private:
     /* Wrapper to sock options.
      * @returns 0 if all is ok. */
-    int setOptions() {
+    bool setOptions() {
         int res[3];
         #if defined(__linux__)
         res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
@@ -197,9 +197,9 @@ private:
         #endif
 
         for (int i = 0; i < 2; i++)
-        if (res[i] != 0) return res[i]; // Error
+        if (res[i] != 0) return false; // Error
 
-        return 0; // Success
+        return true; // Success
     }
 
     /* Associates a local address with a socket.
@@ -227,8 +227,7 @@ public:
             if (fd == -1) throw std::runtime_error("socket() failed");
         };
 
-        int setOptionsResult = setOptions();
-        if (setOptionsResult != 0)      throw std::runtime_error("setsockopt() failed at option " + setOptionsResult);
+        if (!setOptions())               throw std::runtime_error("setsockopt() failed");
         if (bind(port) != 0)            throw std::runtime_error("bind() failed");
         if (::listen(fd, backlog) != 0) throw std::runtime_error("listen() failed");
     }
