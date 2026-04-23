@@ -254,7 +254,7 @@ public:
 
         int client_fd = ::accept(fd, reinterpret_cast<sockaddr*>(&client_addr), &len);
         if (client_fd < 0 && errno != EAGAIN && errno != EWOULDBLOCK) throw std::runtime_error("accept() failed");
-
+        
         char buf[INET_ADDRSTRLEN] = {};
         ::inet_ntop(AF_INET6, &client_addr.sin6_addr, buf, sizeof(buf));
 
@@ -351,6 +351,7 @@ public:
             std::remove_if(m_fds.begin(), m_fds.end(), [fd](const pollfd& p) { return p.fd == fd; }),
             m_fds.end()
         );
+        m_clients.erase(m_clients.find(fd));
     }
 
     int wait(int timeout_ms = -1) {
