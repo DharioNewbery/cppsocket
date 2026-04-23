@@ -101,20 +101,20 @@ void recv(std::vector<char> &buffer) {
         while (headerTotal < sizeof(len)) {
             ssize_t n = ::recv(m_fd, reinterpret_cast<char*>(&len) + headerTotal, sizeof(len) - headerTotal, 0);
 
-            if (n == 0) throw std::runtime_error("Connection closed");
+            if (n == 0) throw std::runtime_error("Connection closed reading header");
             if (n < 0)  throw std::runtime_error("recv failed reading header");
 
             headerTotal += static_cast<std::size_t>(n);
         }
 
         buffer.resize(len);
-        
+
         std::size_t payloadTotal = 0;
         while (payloadTotal < len) {
             ssize_t n = ::recv(m_fd, buffer.data() + payloadTotal, buffer.size() - payloadTotal, 0);
             
             if (n < 0)  throw std::runtime_error("recv failed reading payload"); 
-            if (n == 0) throw std::runtime_error("Connection closed during payload");
+            if (n == 0) throw std::runtime_error("Connection closed reading payload");
 
             payloadTotal += static_cast<std::size_t>(n);
         }
@@ -144,6 +144,9 @@ void recv(std::vector<char> &buffer) {
         while (headerTotal < sizeof(uint64_t)) {
             ssize_t n = ::send(m_fd, reinterpret_cast<char*>(&len) + headerTotal, sizeof(len) - headerTotal, 0);
 
+            if (n < 0)  throw std::runtime_error("send failed sending header");
+            if (n == 0) throw std::runtime_error("Connection closed sending header");
+
             headerTotal += static_cast<std::size_t>(n);
         }
         
@@ -152,8 +155,8 @@ void recv(std::vector<char> &buffer) {
         while (payloadTotal < len) {
             ssize_t n = ::send(m_fd, data.data() + payloadTotal, data.size() - payloadTotal, 0);
             
-            if (n < 0)  throw std::runtime_error("send failed");
-            if (n == 0) throw std::runtime_error("Connection closed");
+            if (n < 0)  throw std::runtime_error("send failed sending payload");
+            if (n == 0) throw std::runtime_error("Connection closed sending payload");
 
             payloadTotal += static_cast<std::size_t>(n);
         }
