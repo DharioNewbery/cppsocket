@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <map>
 #include <algorithm>
+#include <optional>
 
 #if defined(__linux__)
 #include <arpa/inet.h>
@@ -22,32 +23,34 @@
 #include <ws2tcpip.h>
 #define poll WSAPoll
 #define close closesocket
+#include <mutex>
+#include <atomic>
 
-static int socket_count = 0; 
-static bool is_initialized = false;
+static std::atomic<int> socket_count = 0;
+static std::atomic<bool> is_initialized = false;
+static std::mutex wsa_mutex;
 
 void win_startup() {
     socket_count++;
-    static WSADATA wsaData;
     
-    if (is_initialized == true)
-        return;
+    std::lock_guard<std::mutex> lock(wsa_mutex);
+    if (is_initialized) return;
     
     is_initialized = true;
-    
+    static WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != NO_ERROR) {
-        std::cout << "Error at WSAStartup()\n";
+        is_initialized = false;
+        throw std::runtime_error("WSAStartup() failed");
     }
 }
 
 void win_cleanup() {
-    socket_count--;
-    if (socket_count < 1) {
+    std::lock_guard<std::mutex> lock(wsa_mutex);
+    if (--socket_count < 1 && is_initialized) {
         is_initialized = false;
         WSACleanup();
     }
 }
-
 #endif
 
 namespace {
@@ -191,7 +194,7 @@ void recv(std::vector<char> &buffer) {
         return m_fd != -1;
     }
 
-    const int getFd()  { return m_fd; }
+    const int getFd() const { return m_fd; }
 
 private:
     int m_fd;
@@ -272,7 +275,7 @@ public:
 
     /* Accepts a connection from the backlog and creates a socket.
      * @throw std::runtime_error on error. */
-    Socket accept() {
+    std::optional<Socket> accept() {
         sockaddr_in6 client_addr{};
         socklen_t len = sizeof(client_addr);
 
@@ -281,7 +284,8 @@ public:
             if (errno != EAGAIN && errno != EWOULDBLOCK) {
                 throw std::runtime_error("accept() failed.");
             }
-            throw std::runtime_error("accept() failed because it would block.");
+
+            return std::nullopt;
         }
         
         char buf[INET_ADDRSTRLEN] = {};
@@ -319,9 +323,6 @@ int checkIPVersion(const std::string& ip) {
  * @return Socket for the accepted connection.
  * @throw std::runtime_error on error. */ 
 Socket connect(const std::string &host, const uint16_t &port) {
-    #if defined(_WIN32) || defined(_WIN64)
-    win_startup();
-    #endif
 
     int fd;
 
