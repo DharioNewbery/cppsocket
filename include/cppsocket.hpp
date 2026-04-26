@@ -93,14 +93,13 @@ public:
     }
 
     ~Socket() {
-        if (m_fd != -1) {
-            close(m_fd);
-            #if defined(_WIN32) || defined(_WIN64)
-            closesocket();
-            #endif
-        }
+        if (m_fd == -1) return;
+
         #if defined(_WIN32) || defined(_WIN64)
+        closesocket(m_fd);        
         win_cleanup();
+        #else
+        close(m_fd);
         #endif
     }
 
@@ -208,8 +207,7 @@ private:
     /* Wrapper to sock options.
      * @returns 0 if all is ok. */
     bool setOptions(bool isIpv4) {
-        int optnum = 3;
-        int res[optnum];
+        int res[3];
         #if defined(__linux__)
         if (isIpv4) res[0] = 0;
         else res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
@@ -222,7 +220,7 @@ private:
         res[2] = ::ioctlsocket(fd, FIONBIO, (u_long*) &reuseaddr);
         #endif
 
-        for (int i = 0; i < optnum; i++)
+        for (int i = 0; i < 3; i++)
         if (res[i] != 0) return false; // Error
 
         return true; // Success
@@ -269,16 +267,15 @@ public:
     }
     
     const int getFd() const { return fd; }
-~Acceptor() {
-        if (fd != -1) {
-            #if defined(_WIN32) || defined(_WIN64)
-            closesocket(fd);
-            #else
-            close(fd);
-            #endif
-        }
+
+    ~Acceptor() {
+        if (fd == -1) return;
         #if defined(_WIN32) || defined(_WIN64)
+        closesocket(fd);
         win_cleanup();
+
+        #else
+        close(fd);
         #endif
     }
 
@@ -349,7 +346,7 @@ int checkIPVersion(const std::string& ip) {
 
         if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
             #if defined(_WIN32) || defined(_WIN64)
-            closesocket();
+            closesocket(fd);
             #else
             close(fd);
             #endif
@@ -367,7 +364,7 @@ int checkIPVersion(const std::string& ip) {
 
         if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
             #if defined(_WIN32) || defined(_WIN64)
-            closesocket();
+            closesocket(fd);
             #else
             close(fd);
             #endif
