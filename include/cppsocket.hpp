@@ -22,7 +22,6 @@
 #include <sys/types.h>
 #include <ws2tcpip.h>
 #define poll WSAPoll
-#define close closesocket
 #include <mutex>
 #include <atomic>
 
@@ -96,6 +95,9 @@ public:
     ~Socket() {
         if (m_fd != -1) {
             close(m_fd);
+            #if defined(_WIN32) || defined(_WIN64)
+            closesocket();
+            #endif
         }
         #if defined(_WIN32) || defined(_WIN64)
         win_cleanup();
@@ -337,7 +339,11 @@ Socket connect(const std::string &host, const uint16_t &port) {
         ::inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
 
         if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+            #if defined(_WIN32) || defined(_WIN64)
+            closesocket();
+            #else
             close(fd);
+            #endif
             throw std::runtime_error("connect() failed");
         }
 
@@ -351,7 +357,11 @@ Socket connect(const std::string &host, const uint16_t &port) {
         ::inet_pton(AF_INET6, host.c_str(), &addr.sin6_addr);
 
         if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+            #if defined(_WIN32) || defined(_WIN64)
+            closesocket();
+            #else
             close(fd);
+            #endif
             throw std::runtime_error("connect() failed");
         }
     } else {
