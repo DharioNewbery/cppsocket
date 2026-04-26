@@ -210,13 +210,13 @@ private:
     bool setOptions(bool isIpv4) {
         int res[3];
         #if defined(__linux__)
-        if (!isIpv4)
-        res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
+        if (isIpv4) res[0] = 0;
+        else res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
         res[1] = ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuseaddr, sizeof(reuseaddr));
         res[2] = ::fcntl(fd, F_SETFL, O_NONBLOCK); 
         #else
-        if (!isIpv4)
-        res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (char *) &v6only, sizeof(v6only));
+        if (isIpv4) res[0] = 0;
+        else res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (char *) &v6only, sizeof(v6only));
         res[1] = ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *) &reuseaddr, sizeof(reuseaddr));
         res[2] = ::ioctlsocket(fd, FIONBIO, (u_long*) &reuseaddr);
         #endif
