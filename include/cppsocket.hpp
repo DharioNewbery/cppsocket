@@ -204,13 +204,15 @@ class Acceptor {
 private:
     /* Wrapper to sock options.
      * @returns 0 if all is ok. */
-    bool setOptions() {
+    bool setOptions(bool isIpv4) {
         int res[3];
         #if defined(__linux__)
+        if (!isIpv4)
         res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
         res[1] = ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuseaddr, sizeof(reuseaddr));
         res[2] = ::fcntl(fd, F_SETFL, O_NONBLOCK); 
         #else
+        if (!isIpv4)
         res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (char *) &v6only, sizeof(v6only));
         res[1] = ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *) &reuseaddr, sizeof(reuseaddr));
         res[2] = ::ioctlsocket(fd, FIONBIO, (u_long*) &reuseaddr);
@@ -242,12 +244,14 @@ public:
 
         fd = ::socket(AF_INET6, SOCK_STREAM, 0);
         
+        bool isIpv4 = false;
         if (fd == -1) {
             fd = ::socket(AF_INET, SOCK_STREAM, 0); // IPv4 fallback
             if (fd == -1) throw std::runtime_error("socket() failed");
+            isIpv4 = true;
         };
 
-        if (!setOptions())               throw std::runtime_error("setsockopt() failed");
+        if (!setOptions(isIpv4))        throw std::runtime_error("setsockopt() failed");
         if (bind(port) != 0)            throw std::runtime_error("bind() failed");
         if (::listen(fd, backlog) != 0) throw std::runtime_error("listen() failed");
     }
@@ -273,7 +277,12 @@ public:
         socklen_t len = sizeof(client_addr);
 
         int client_fd = ::accept(fd, reinterpret_cast<sockaddr*>(&client_addr), &len);
-        if (client_fd < 0 && errno != EAGAIN && errno != EWOULDBLOCK) throw std::runtime_error("accept() failed");
+        if (client_fd < 0) {
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                throw std::runtime_error("accept() failed.");
+            }
+            throw std::runtime_error("accept() failed because it would block.");
+        }
         
         char buf[INET_ADDRSTRLEN] = {};
         ::inet_ntop(AF_INET6, &client_addr.sin6_addr, buf, sizeof(buf));
