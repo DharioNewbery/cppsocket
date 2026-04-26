@@ -83,16 +83,14 @@ public:
     /* Constructors */
     Socket(int file_descriptor): m_fd(file_descriptor) {
         #if defined(_WIN32) || defined(_WIN64)
+        if (m_fd != -1)
         win_startup();
         #endif
     }
     Socket(Socket& other) noexcept = delete;
-    Socket(Socket&& other) noexcept { 
+    Socket(Socket&& other) noexcept {
         m_fd = other.m_fd; 
-        other.m_fd = -1; 
-        #if defined(_WIN32) || defined(_WIN64)
-        win_startup();
-        #endif
+        other.m_fd = -1;
     }
 
     ~Socket() {
