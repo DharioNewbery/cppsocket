@@ -208,7 +208,8 @@ private:
     /* Wrapper to sock options.
      * @returns 0 if all is ok. */
     bool setOptions(bool isIpv4) {
-        int res[3];
+        int optnum = 3;
+        int res[optnum];
         #if defined(__linux__)
         if (isIpv4) res[0] = 0;
         else res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
@@ -221,7 +222,7 @@ private:
         res[2] = ::ioctlsocket(fd, FIONBIO, (u_long*) &reuseaddr);
         #endif
 
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < optnum; i++)
         if (res[i] != 0) return false; // Error
 
         return true; // Success
@@ -230,12 +231,20 @@ private:
     /* Associates a local address with a socket.
      * @param port the port that will be used.
      * @returns 0 if all is ok. */
-    int bind(int port) {
-        sockaddr_in6 addr{};
-        addr.sin6_family = AF_INET6;
-        addr.sin6_port   = htons(port);
-        addr.sin6_addr   = in6addr_any;
-        return ::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    int bind(int port, bool isIpv4) {
+        if (isIpv4) {
+            sockaddr_in addr{};
+            addr.sin_family      = AF_INET;
+            addr.sin_port        = htons(port);
+            addr.sin_addr.s_addr = INADDR_ANY;
+            return ::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+        } else {
+            sockaddr_in6 addr{};
+            addr.sin6_family = AF_INET6;
+            addr.sin6_port   = htons(port);
+            addr.sin6_addr   = in6addr_any;
+            return ::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+        }
     }
     
 public:
@@ -255,7 +264,7 @@ public:
         };
 
         if (!setOptions(isIpv4))        throw std::runtime_error("setsockopt() failed");
-        if (bind(port) != 0)            throw std::runtime_error("bind() failed");
+        if (bind(port, isIpv4) != 0)            throw std::runtime_error("bind() failed");
         if (::listen(fd, backlog) != 0) throw std::runtime_error("listen() failed");
     }
     
@@ -288,7 +297,7 @@ public:
             return std::nullopt;
         }
         
-        char buf[INET_ADDRSTRLEN] = {};
+        char buf[INET6_ADDRSTRLEN] = {};
         ::inet_ntop(AF_INET6, &client_addr.sin6_addr, buf, sizeof(buf));
 
         return Socket(client_fd);
@@ -334,7 +343,6 @@ Socket connect(const std::string &host, const uint16_t &port) {
         sockaddr_in addr{};
         addr.sin_family      = AF_INET;
         addr.sin_port        = htons(port);
-        addr.sin_addr.s_addr = INADDR_ANY; 
 
         ::inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
 
@@ -406,7 +414,8 @@ public:
         return false;
     }
 
-    void execute(auto func) {
+    template<typename F>
+    void execute(F func) {
         for (auto it = m_clients.begin(); it != m_clients.end(); ) {
             int clientFd = it->first;
             cppsocket::Socket& clientSock = it->second;
