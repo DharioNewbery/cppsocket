@@ -330,8 +330,9 @@ int checkIPVersion(const std::string& ip) {
  * @param host The server's IPV4 address.
  * @param port The port that the server is listening to.
  * @return Socket for the accepted connection.
- * @throw std::runtime_error on error. */ 
-Socket connect(const std::string &host, const uint16_t &port) {
+ * @throw std::runtime_error on error. 
+ * @warning No current support to hostname resolution. */
+ Socket connect(const std::string &host, const uint16_t &port) {
 
     int fd;
 
