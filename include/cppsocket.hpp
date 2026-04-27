@@ -109,7 +109,7 @@ public:
     *  allows it to handle large files that may require multiple recv calls.
     *  @param buffer A reference to a vector that will be resized and filled with the received data.
     *  @throw std::runtime_error on error. */
-void recv(std::vector<char> &buffer) {
+    void recv(std::vector<char> &buffer) {
         if (!isValid()) throw std::runtime_error("Invalid socket");
 
         uint64_t lenNet = 0;
@@ -206,18 +206,28 @@ class Acceptor {
 private:
     /* Wrapper to sock options.
      * @returns 0 if all is ok. */
-    bool setOptions(bool isIpv4) {
+    bool setOptions(bool isIpv4, bool nonblocking = true) {
         int res[3];
         #if defined(__linux__)
         if (isIpv4) res[0] = 0;
         else res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
         res[1] = ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuseaddr, sizeof(reuseaddr));
-        res[2] = ::fcntl(fd, F_SETFL, O_NONBLOCK); 
+        if (nonblocking) {
+            int flags = fcntl(fd, F_GETFL, 0);
+            if (flags == -1) return false;
+            res[2] = fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+        } else {
+            res[2] = 0;
+        }
         #else
         if (isIpv4) res[0] = 0;
         else res[0] = ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (char *) &v6only, sizeof(v6only));
         res[1] = ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *) &reuseaddr, sizeof(reuseaddr));
-        res[2] = ::ioctlsocket(fd, FIONBIO, (u_long*) &reuseaddr);
+        if (nonblocking) {
+            res[2] = ::ioctlsocket(fd, FIONBIO, (u_long*) &reuseaddr);
+        } else {
+            res[2] = 0;
+        }
         #endif
 
         for (int i = 0; i < 3; i++)
@@ -247,7 +257,7 @@ private:
     
 public:
     /* Constructor */
-    Acceptor(const uint16_t &port) {
+    Acceptor(const uint16_t &port, bool nonblocking = false) {
         #if defined(_WIN32) || defined(_WIN64)
         win_startup();
         #endif
@@ -261,7 +271,7 @@ public:
             isIpv4 = true;
         };
 
-        if (!setOptions(isIpv4))        throw std::runtime_error("setsockopt() failed");
+        if (!setOptions(isIpv4, nonblocking))        throw std::runtime_error("setsockopt() failed");
         if (bind(port, isIpv4) != 0)            throw std::runtime_error("bind() failed");
         if (::listen(fd, backlog) != 0) throw std::runtime_error("listen() failed");
     }
